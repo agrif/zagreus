@@ -13,6 +13,32 @@ import click
 
 import zagreus.server
 
+# https://www.windmill.co.uk/ascii-control-codes.html
+TABLE_LOWER = r'2abcdefghijklmnopqrstuvwxyz[\]6-'
+TABLE_UPPER = r'@ABCDEFGHIJKLMNOPQRSTUVWXYZ{|}^_'
+TABLE_NAMES = r'@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_'
+
+def control(c):
+    try:
+        return chr(TABLE_LOWER.index(c))
+    except ValueError:
+        pass
+    try:
+        return chr(TABLE_UPPER.index(c))
+    except ValueError:
+        pass
+    raise ValueError('control code not found: ^{}'.format(s))
+
+def base_key(c):
+    if ord(c) < len(TABLE_LOWER):
+        return TABLE_LOWER[ord(c)]
+    return c.lower()
+
+def pretty_key(c):
+    if ord(c) < len(TABLE_NAMES):
+        return 'C-' + TABLE_NAMES[ord(c)]
+    return c.upper()
+
 # https://code.activestate.com/recipes/475116-using-terminfo-for-portable-color-output-cursor-co/
 curses.setupterm()
 DELAY_RE = re.compile(r'\$<\d+>[/*]?')
@@ -83,7 +109,7 @@ class Z80Client:
         self.in_menu = False
 
         self.buffer_size = 1024
-        self.menu_key = chr(0x14) # C-t
+        self.menu_key = control('a') # C-t
 
     @classmethod
     def inet(cls, host, port):
@@ -157,24 +183,28 @@ class Z80Client:
                     self.send(c)
 
     def handle_menu_key(self, c):
-        if c == self.menu_key:
+        c = base_key(c)
+        menu = pretty_key(self.menu_key)
+
+        helps = []
+        def pressed(letters, helptext):
+            helps.append((pretty_key(letters[0]), helptext))
+            return c in letters.lower()
+
+        if pressed('r', 'reset'):
+            self.send_command(zagreus.server.RESET)
+        elif pressed('c', 'clear screen'):
+            self.console.write(CLEAR)
+        elif pressed('xq', 'exit'):
+            self.close()
+        elif pressed(base_key(self.menu_key), 'send ' + menu):
             # repeated prefix sends prefix
             self.send(c)
-        elif c in 'xXqQ':
-            self.close()
-        elif c in 'rR':
-            self.send_command(zagreus.server.RESET)
-        elif c in 'cC':
-            self.console.write(CLEAR)
-        elif c in 'hH?/':
+        elif pressed('h?', 'help'):
             with self.console:
                 self.console.write('====\n')
-                self.console.write('C-t x\texit\n')
-                self.console.write('C-t r\treset\n')
-                self.console.write('C-t c\tclear screen\n')
-                self.console.write('\n')
-                self.console.write('C-t h\thelp\n')
-                self.console.write('C-t C-t\tsend C-t\n')
+                for (key, desc) in helps:
+                    self.console.write('{} {}\t{}\n'.format(menu, key, desc))
                 self.console.write('====\n')
 
 @click.command()
