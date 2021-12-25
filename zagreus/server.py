@@ -185,8 +185,8 @@ class Z80Server:
                             self.handle_command(chunk)
                         else:
                             logger.debug('[{}]: {}'.format(self.conn_addrs[s], repr(chunk)))
-                            # turn ENTER into CR+LF
-                            chunk = chunk.replace('\n', '\r\n')
+                            # turn ENTER into CR (no LF)
+                            chunk = chunk.replace('\n', '\r')
                             self.z80.write(chunk)
                 else:
                     self.close_client(s)
