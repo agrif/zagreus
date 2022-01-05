@@ -11,6 +11,7 @@ import time
 
 import click
 
+import zagreus.expect
 import zagreus.server
 
 # https://www.windmill.co.uk/ascii-control-codes.html
@@ -65,9 +66,11 @@ class Console:
     # use context manager to temporarily enter normal mode
     def __enter__(self):
         self.cleanup()
+        self.write('====\n')
         return self
 
     def __exit__(self, type, value, traceback):
+        self.write('====\n')
         self.setup()
 
     def fileno(self):
@@ -107,6 +110,7 @@ class Z80Client:
         self.running = True
         self.console = Console(self)
         self.in_menu = False
+        self.expect = None
 
         self.buffer_size = 1024
         self.menu_key = control('a') # C-t
@@ -153,7 +157,10 @@ class Z80Client:
             return
 
         fds = [self.sock, self.console]
-        reads, _, excepts = select.select(fds, [], fds)
+        timeout = None
+        if self.expect is not None:
+            timeout = self.expect.timeout
+        reads, _, excepts = select.select(fds, [], fds, timeout)
 
         if excepts:
             # something has gone wrong!
@@ -171,6 +178,9 @@ class Z80Client:
                         # fix up some odd control characters
                         chunk = chunk.replace('\f', CLEAR)
                         self.console.write(chunk)
+                        if self.expect is not None:
+                            self.expect.interact(chunk)
+                            
             elif fd is self.console:
                 # console has new key for us
                 c = self.console.getkey()
@@ -182,6 +192,41 @@ class Z80Client:
                 else:
                     self.send(c)
 
+        # make sure to jog the script at least once
+        if self.expect is not None:
+            self.expect.interact()
+
+    def run_script(self, expect):
+        self.expect = expect
+        self.expect.on_output = self.send
+        self.expect.on_error = self.handle_script_error
+        self.expect.interact()
+
+    def handle_script_error(self, type, value, traceback):
+        with self.console:
+            self.console.write('error in script `{}`\n'.format(self.expect.name))
+            self.console.write('{}: {}\n'.format(type.__name__, value))
+
+    @zagreus.expect.Expect.script
+    def small_computer_monitor(self):
+        self.send_command(zagreus.server.RESET)
+        yield from zagreus.expect.expect('Small Computer Monitor - RC2014\r\n*', timeout=3)
+
+    @zagreus.expect.Expect.script
+    def cpm(self):
+        yield from self.small_computer_monitor()
+        yield from zagreus.expect.sleep(0.3)
+        yield from zagreus.expect.send('CPM\n')
+        yield from zagreus.expect.expect('A>', timeout=5)
+
+    @zagreus.expect.Expect.script
+    def basic(self):
+        yield from self.small_computer_monitor()
+        yield from zagreus.expect.send('BASIC\n')
+        yield from zagreus.expect.expect('Memory top? ')
+        yield from zagreus.expect.send('\n')
+        yield from zagreus.expect.expect('Ok')
+
     def handle_menu_key(self, c):
         c = base_key(c)
         menu = pretty_key(self.menu_key)
@@ -191,21 +236,23 @@ class Z80Client:
             helps.append((pretty_key(letters[0]), helptext))
             return c in letters.lower()
 
-        if pressed('r', 'reset'):
-            self.send_command(zagreus.server.RESET)
-        elif pressed('c', 'clear screen'):
+        if pressed('r', 'reset to small computer monitor'):
+            self.run_script(self.small_computer_monitor())
+        elif pressed('l', 'clear screen'):
             self.console.write(CLEAR)
         elif pressed('xq', 'exit'):
             self.close()
+        elif pressed('c', 'boot CP/M'):
+            self.run_script(self.cpm())
+        elif pressed('b', 'boot BASIC'):
+            self.run_script(self.basic())
         elif pressed(base_key(self.menu_key), 'send ' + menu):
             # repeated prefix sends prefix
             self.send(c)
         elif pressed('h?', 'help'):
             with self.console:
-                self.console.write('====\n')
                 for (key, desc) in helps:
                     self.console.write('{} {}\t{}\n'.format(menu, key, desc))
-                self.console.write('====\n')
 
 @click.command()
 @click.option('-h', '--host', default=None,
