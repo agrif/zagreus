@@ -1,0 +1,12 @@
+[Unit]
+Description=Zagreus Z80
+StartLimitIntervalSec=15
+StartLimitBurst=3
+
+[Service]
+Type=exec
+WorkingDirectory=/home/agrif/zagreus/
+ExecStart=/home/agrif/.local/bin/ttyd --base-path /z80 --index ./html/dist/inline.html --writable -t disableResizeOverlay=true -t disableLeaveAlert=true -t titleFixed=zagreus -- ./local/zagreus-env/bin/python -m zagreus.client
+
+[Install]
+WantedBy=default.target
