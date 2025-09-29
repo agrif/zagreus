@@ -1,4 +1,4 @@
 click==8.0.3
 daemonize==2.5.0
 pyserial==3.5
-RPi.GPIO==0.7.0
+RPi.GPIO==0.7.1
